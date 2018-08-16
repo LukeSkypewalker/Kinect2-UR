@@ -1,0 +1,22 @@
+freelib kinect receipt from alex
+
+
+GIT
+DocTest for calculation
+get_inv_kin ?
+watch Daniel Shiffman Processing
+spec for FOV
+
+
+make DataSet (time series)
+Filter noise - Varkuster openGL
+
+Libraries / Papers / Thesises
+
+Advanced Calibration (redundant)
+
+
+
+
+
+key++ print letters and test!
