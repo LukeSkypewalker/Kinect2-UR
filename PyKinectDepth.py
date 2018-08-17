@@ -28,50 +28,23 @@ def find_closest_element_index(frame):
     return valid_idx[frame[valid_idx].argmin()]
 
 
-def find_upper_element_index(frame):
+def find_top_point_index(frame):
     unit_frame = frame.copy()
     unit_frame[unit_frame > 0] = 1
     return unit_frame.argmax()
 
 
-def noise_filter(frame, prev1_frame, prev2_frame,prev3_frame):
-    frame[:5120] = 0
-    frame[-60000:] = 0
-    frame[frame < 800] = 0
-    frame[frame > 4500] = 0
-    frame_copy = frame.copy()
-
-    if prev3_frame is not None:
-        mask0 = frame > 0
-        mask1 = prev1_frame > 0
-        mask2 = prev2_frame > 0
-        mask3 = prev3_frame > 0
-        mask = mask0 & mask1 & mask2 #& mask3
-        frame[~mask] = 0
-
-    prev3_frame = prev2_frame
-    prev2_frame = prev1_frame
-    prev1_frame = frame_copy
-    return frame, prev1_frame, prev2_frame, prev3_frame
+def noise_filter(last_frames):
+    mask = np.all(last_frames > 13, 0)
+    filtered_frame = np.copy(last_frames[0])
+    filtered_frame[~mask] = 0
+    return filtered_frame
 
 
-def calc_mean_coords(frame, X, Y, Z, min_ind):
-    x = min_ind % 512
-    X = np.roll(X, 1)
-    X[0] = x
-    mean_x = X.mean()
-
-    y = min_ind // 512
-    Y = np.roll(Y, 1)
-    Y[0] = y
-    mean_y = Y.mean()
-
-    z = frame[min_ind]
-    Z = np.roll(Z, 1)
-    Z[0] = z
-    mean_z = Z.mean()
-
-    return X, Y, Z, mean_x, mean_y, mean_z
+def enqueue(item, array):
+    result = np.roll(array, 1, 0)
+    result[0] = item
+    return result
 
 
 def calc_coords_in_mm(x_in_pixels, y_in_pixels, depth):
@@ -205,29 +178,13 @@ class DepthRuntime(object):
         target_surface.unlock()
 
     def run(self):
-        X = np.zeros(50)
-        Y = np.zeros(50)
-        Z = np.zeros(50)
-
-        prev1_frame = None
-        prev2_frame = None
-        prev3_frame = None
+        last_points_of_interest = np.zeros((50,3))
+        last_frames = np.zeros((3, frame_width*frame_height))
 
         points_from_robot = []
-        points_from_kinect1 = []
-        points_from_kinect2 = []
-        points_from_kinect3 = []
+        points_from_kinect = []
+
         dataset = []
-
-        poselist = ([ 0.0248, -0.1748,  1.3079, 0, 0, 0],
-                    [0.4091, 0.8586, 0.8775, 0, 0, 0],
-                    [-0.3577,  0.7804,  0.8975, 0, 0, 0],
-                    [ 0.8673, -0.2957,  0.8791, 0, 0, 0],
-
-                    [-0.7596,  0.0925,  1.0222, 0, 0, 0],
-                    [ 0.4372,  0.18387, 1.1031, 0, 0, 0],
-                    [-0.5041,  0.5650,  0.9561, 0, 0, 0],
-                    [-0.1466,  0.1610,  0.6727, 0, 0, 0])
 
 
         # -------- Main Program Loop -----------
@@ -244,134 +201,28 @@ class DepthRuntime(object):
             if self._kinect.has_new_depth_frame():
                 frame = self._kinect.get_last_depth_frame()
                 # frame = np.flip(frame.reshape((frame_height, frame_width)), 1).reshape(-1)
-                frame, prev1_frame, prev2_frame, prev3_frame = noise_filter(frame, prev1_frame, prev2_frame, prev3_frame)
 
-                min_ind = find_upper_element_index(frame)
-                # OR min_ind = find_closest_element(frame)
+                frame[:5120] = 0
+                frame[-60000:] = 0
+                frame[frame < 800] = 0
+                frame[frame > 4500] = 0
 
-                X, Y, Z, mean_x, mean_y, mean_z = calc_mean_coords(frame, X, Y, Z, min_ind)
-                # print(mean_x, mean_y, min_ind)
+                last_frames = enqueue(frame, last_frames)
+                filtered_frame = noise_filter(last_frames)
 
-                kx, ky, kz = calc_coords_in_mm(mean_x, mean_y, mean_z)
-                ckx, cky, ckz = calc_coords_in_mm2(mean_x, mean_y, mean_z)
-                cckx, ccky, cckz = calc_coords_in_mm3(mean_x, mean_y, mean_z)
+                top_point_index = find_top_point_index(filtered_frame)
+                # OR top_point_index = find_closest_element(filtered_frame)
 
-                #print('my_coords:', kx, ky, kz)
-                #print('Alex_coords:', ckx, cky, ckz)
-                #print('Alex+calibration_coords:', cckx, ccky, cckz)
+                top_point = (top_point_index % frame_width, top_point_index // frame_width, filtered_frame[top_point_index])
+                last_points_of_interest = enqueue(top_point, last_points_of_interest)
+                mean_point = last_points_of_interest.mean(axis=0)
+                # print(mean_x, mean_y, top_point_index)
 
-                # check_user_input an print data
-                if pygame.key.get_pressed()[pygame.K_q]:
-                    points_from_kinect1.append((kx, ky, kz))
-                    points_from_kinect2.append((ckx, cky, ckz))
-                    points_from_kinect3.append((cckx, ccky, cckz))
-                    pos = robot.get_pos()
-                    print([kx,ky,kz])
-                    print([*pos*1000], '\n')
-                    points_from_robot.append(pos * 1000)
-                    sleep(0.2)
+                self.get_user_input(dataset, filtered_frame, mean_point, points_from_kinect, points_from_robot)
 
-                if pygame.key.get_pressed()[pygame.K_r]:
-                    def robot_routine():
-                        robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
-                        for pose in poselist:
-                            robot.movex('movej', pose, acc=0.4, vel=0.4)
-                            sleep(5)
-                            points_from_kinect1.append((kx, ky, kz))
-                            points_from_kinect2.append((ckx, cky, ckz))
-                            points_from_kinect3.append((cckx, ccky, cckz))
-                            pos = robot.get_pos()
-                            points_from_robot.append(pos * 1000)
-                            print([int(kx), int(ky), int(kz)])
-                            print([int(ckx*1000), int(cky*1000), int(ckz*1000)])
-                            print([int(cckx), int(ccky), int(cckz)])
-                            print([*pos * 1000], '\n')
+                self.draw_depth_frame(filtered_frame, self._frame_surface)
 
-                    threading.Thread(target=robot_routine, ).start()
-                    sleep(0.2)
-
-                if pygame.key.get_pressed()[pygame.K_e]:
-
-                    # todo work with these points
-                    robot_points, kinect_points = generate_sample_points()
-
-                    def robot_routine(robot_points):
-                        robot_poses = np.pad(robot_points, ((0, 0), (0, 3)), 'constant')
-                        robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
-                        for pose in poselist:
-                            robot.movex('movej', robot_poses, acc=0.4, vel=0.4)
-                            sleep(5)
-                            points_from_kinect1.append((kx, ky, kz))
-                            points_from_kinect2.append((ckx, cky, ckz))
-                            points_from_kinect3.append((cckx, ccky, cckz))
-                            pos = robot.get_pos()
-                            points_from_robot.append(pos * 1000)
-                            print([int(kx), int(ky), int(kz)])
-                            print([int(ckx*1000), int(cky*1000), int(ckz*1000)])
-                            print([int(cckx), int(ccky), int(cckz)])
-                            print([*pos * 1000], '\n')
-
-                    threading.Thread(target=robot_routine, args=(robot_points)).start()
-                    sleep(0.2)
-
-                if pygame.key.get_pressed()[pygame.K_w]:
-                    print(*points_from_kinect1)
-                    print(*points_from_kinect2)
-                    print(*points_from_kinect3)
-                    print(*points_from_robot, '\n')
-                    sleep(0.1)
-                '''
-                if pygame.key.get_pressed()[pygame.K_r]:
-                    coord_from_kinect1 = [*points_from_kinect1[-1], 1]
-                    coord_from_kinect2 = [*points_from_kinect2[-1], 1]
-                    coord_from_kinect3 = [*points_from_kinect3[-1], 1]
-                    coord = T1 @ np.transpose(coord_from_kinect1)
-                    coord = T2 @ np.transpose(coord_from_kinect2)
-                    coord = T3 @ np.transpose(coord_from_kinect3)
-                    real_robot_coords = points_from_robot[-1]
-                    print(coord[:3].astype(int))
-                    print(*real_robot_coords)
-                    print('error', np.linalg.norm(coord[:3] - [*real_robot_coords]), '\n')
-                    pose = [*coord[:3]/1000, 0, 0, 0]
-                    print(pose)
-                    robot.movel(pose, acc=0.2, vel=0.2)
-                '''
-
-                if pygame.key.get_pressed()[pygame.K_t]:
-                    T1 = calc_transform_matrix(points_from_kinect1, points_from_robot)
-                    T2 = calc_transform_matrix(points_from_kinect2, points_from_robot)
-                    T3 = calc_transform_matrix(points_from_kinect3, points_from_robot)
-                    print("TransformMatrix")
-                    print(T1, '\n')
-                    print(T2, '\n')
-                    print(T3, '\n')
-
-                    test_coordinates(T1, points_from_kinect1, points_from_robot)
-                    test_coordinates(T2, points_from_kinect2, points_from_robot)
-                    test_coordinates(T3, points_from_kinect3, points_from_robot)
-
-
-
-                if pygame.key.get_pressed()[pygame.K_x]:
-                    f = frame.reshape((frame_height, frame_width))
-                    np.savetxt('kinect-%s.txt' %time() , f, fmt='% 4s')
-
-                if pygame.key.get_pressed()[pygame.K_a]:
-                    f = frame.reshape((frame_height, frame_width))
-                    dataset.append(f)
-
-                if pygame.key.get_pressed()[pygame.K_s]:
-                    np.save('kinect-dataset', dataset)
-
-                if pygame.key.get_pressed()[pygame.K_d]:
-                    npz_dataset = np.load('kinect-dataset.npy')
-                    print(npz_dataset.shape)
-
-
-
-                self.draw_depth_frame(frame, self._frame_surface)
-
-                pygame.draw.circle(self._frame_surface, (255, 0, 0), (int(mean_x), int(mean_y)), 10, 1)
+                pygame.draw.circle(self._frame_surface, (255, 0, 0), (int(mean_point[0]), int(mean_point[1])), 10, 1)
             self._screen.blit(self._frame_surface, (0, 0))
             pygame.display.update()
 
@@ -382,6 +233,87 @@ class DepthRuntime(object):
         self._kinect.close()
         pygame.quit()
 
+    def get_user_input(self, dataset, frame, mean_point, points_from_kinect, points_from_robot):
+        mean_point_in_mm = calc_coords_in_mm(mean_point)
+        # print('my_coords:', kx, ky, kz)
+        # print('Alex_coords:', ckx, cky, ckz)
+        # print('Alex+calibration_coords:', cckx, ccky, cckz)
+        # check_user_input an print data
+        if pygame.key.get_pressed()[pygame.K_q]:
+            points_from_kinect.append(mean_point_in_mm)
+            pos = robot.get_pos()
+            print(mean_point_in_mm)
+            print([*pos * 1000], '\n')
+            points_from_robot.append(pos * 1000)
+            sleep(0.2)
+
+        if pygame.key.get_pressed()[pygame.K_r]:
+
+            self.get_initial_transform_matrix()
+
+        if pygame.key.get_pressed()[pygame.K_e]:
+            robot_points, kinect_points = generate_sample_points()
+
+            def robot_routine(robot_points):
+                robot_poses = np.pad(robot_points, ((0, 0), (0, 3)), 'constant')
+                robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
+                for pose in robot_points:
+                    robot.movex('movej', robot_poses, acc=0.4, vel=0.4)
+                    sleep(5)
+
+            threading.Thread(target=robot_routine, args=(robot_points)).start()
+            sleep(0.2)
+
+        if pygame.key.get_pressed()[pygame.K_w]:
+            print(*points_from_kinect)
+            print(*points_from_robot, '\n')
+            sleep(0.1)
+
+        if pygame.key.get_pressed()[pygame.K_t]:
+            transform = calc_transform_matrix(points_from_kinect, points_from_robot)
+            print("TransformMatrix")
+            print(transform, '\n')
+
+            test_coordinates(transform, points_from_kinect, points_from_robot)
+
+        if pygame.key.get_pressed()[pygame.K_x]:
+            f = frame.reshape((frame_height, frame_width))
+            np.savetxt('kinect-%s.txt' % time(), f, fmt='% 4s')
+        if pygame.key.get_pressed()[pygame.K_a]:
+            f = frame.reshape((frame_height, frame_width))
+            dataset.append(f)
+        if pygame.key.get_pressed()[pygame.K_s]:
+            np.save('kinect-dataset', dataset)
+        if pygame.key.get_pressed()[pygame.K_d]:
+            npz_dataset = np.load('kinect-dataset.npy')
+            print(npz_dataset.shape)
+
+    @staticmethod
+    def get_initial_transform_matrix(points_from_kinect, points_from_robot, mean_point_in_mm):
+        def robot_routine():
+            poselist = ([0.0248, -0.1748, 1.3079, 0, 0, 0],
+                        [0.4091, 0.8586, 0.8775, 0, 0, 0],
+                        [-0.3577, 0.7804, 0.8975, 0, 0, 0],
+                        [0.8673, -0.2957, 0.8791, 0, 0, 0],
+
+                        [-0.7596, 0.0925, 1.0222, 0, 0, 0],
+                        [0.4372, 0.18387, 1.1031, 0, 0, 0],
+                        [-0.5041, 0.5650, 0.9561, 0, 0, 0],
+                        [-0.1466, 0.1610, 0.6727, 0, 0, 0])
+
+            robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
+            for pose in poselist:
+                robot.movex('movej', pose, acc=0.4, vel=0.4)
+                sleep(5)
+                points_from_kinect.append(mean_point_in_mm)
+                pos = robot.get_pos()
+                points_from_robot.append(pos * 1000)
+                print(mean_point_in_mm)
+
+                print([*pos * 1000], '\n')
+
+        threading.Thread(target=robot_routine, ).start()
+        sleep(0.2)
 
 
 __main__ = "Kinect v2 Depth"
