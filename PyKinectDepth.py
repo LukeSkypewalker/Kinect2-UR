@@ -8,6 +8,7 @@ import pygame
 import numpy as np
 import urx
 from coord_transformation import get_transform
+from kinect_point_generator import PointGenerator
 
 frame_width = 512
 frame_height = 424
@@ -37,7 +38,7 @@ def noise_filter(frame, prev1_frame, prev2_frame,prev3_frame):
     frame[:5120] = 0
     frame[-60000:] = 0
     frame[frame < 800] = 0
-    frame[frame > 4000] = 0
+    frame[frame > 4500] = 0
     frame_copy = frame.copy()
 
     if prev3_frame is not None:
@@ -45,7 +46,7 @@ def noise_filter(frame, prev1_frame, prev2_frame,prev3_frame):
         mask1 = prev1_frame > 0
         mask2 = prev2_frame > 0
         mask3 = prev3_frame > 0
-        mask = mask0 & mask1 & mask2 & mask3
+        mask = mask0 & mask1 & mask2 #& mask3
         frame[~mask] = 0
 
     prev3_frame = prev2_frame
@@ -94,20 +95,20 @@ def calc_coords_in_mm2(x_in_pixels, y_in_pixels, depth):
 
 
 def calc_coords_in_mm3(x_in_pixels, y_in_pixels, depth):
-    cx = 254.878
-    cy = 205.395
-    fx = 365.456
-    fy = 365.456
-    k1 = 0.0905474
-    k2 = -0.26819
-    k3 = 0.0950862
-    p1 = 0.0
-    p2 = 0.0
+    cx = 2.5246874698519187e+02
+    cy = 2.0724109283529990e+02
+    fx = 3.6603389564721579e+02
+    fy = 3.6671567662701682e+02
+    k1 = 1.0256662997128010e-01
+    k2 = -3.0267317007504330e-01
+    k3 = -1.3424675613181905e-03
+    p1 = -9.1787629334898115e-04
+    p2 = 1.2367949702286907e-01
 
-    r = x_in_pixels**2 + y_in_pixels**2
-    k = 1 + k1*r + k2*r**2 + k3*r**3
-    x_px_corrected = x_in_pixels*k + 2*p1*x_in_pixels*y_in_pixels + p2*(r+2*x_in_pixels**2)
-    y_px_corrected = y_in_pixels*k + p1*(r+2*y_in_pixels**2) + 2*p2*x_in_pixels*y_in_pixels
+    R = x_in_pixels**2 + y_in_pixels**2
+    K = 1 + k1*R + k2*R**2 + k3*R**3
+    x_px_corrected = x_in_pixels*K + 2*p1*x_in_pixels*y_in_pixels + p2*(R+2*x_in_pixels**2)
+    y_px_corrected = y_in_pixels*K + p1*(R+2*y_in_pixels**2) + 2*p2*x_in_pixels*y_in_pixels
 
     z = depth/1000
     x = (x_px_corrected - cx) * z / fx
@@ -144,6 +145,27 @@ def calc_transform_matrix(points_from_kinect, points_from_robot):
                                     X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3, X4, Y4, Z4)
     T = np.vstack((transformMatrix, [0, 0, 0, 1]))
     return T
+
+
+def generate_sample_points():
+    transform = np.array([
+        [3.41949594e-01, -2.80219746e-01, -8.90750570e-01, 2.04391318],
+        [-9.42365806e-01, -6.98786949e-02, -3.53852884e-01, 1.23556853],
+        [-1.18430076e-02, 9.62697673e-01, -2.80952091e-01, 0.960580436],
+        [0, 0, 0, 1]
+    ])
+    generator = PointGenerator()
+    return generator.generate_robot_points(
+        min_distance=0.8,
+        max_distance=1.8,
+        fov_degrees=(60, 58),
+        distance_slice_count=10,
+        point_counts_in_slice=(10, 10),
+        transform_matrix=transform,
+        max_radius=1.35,
+        tool_vertical_offset=0.1,
+        min_height=0.6,
+        min_cylinder_radius=0.2)
 
 
 class DepthRuntime(object):
@@ -183,9 +205,9 @@ class DepthRuntime(object):
         target_surface.unlock()
 
     def run(self):
-        X = np.zeros(100)
-        Y = np.zeros(100)
-        Z = np.zeros(100)
+        X = np.zeros(50)
+        Y = np.zeros(50)
+        Z = np.zeros(50)
 
         prev1_frame = None
         prev2_frame = None
@@ -198,12 +220,12 @@ class DepthRuntime(object):
         dataset = []
 
         poselist = ([ 0.0248, -0.1748,  1.3079, 0, 0, 0],
-                    [-0.2577,  0.7804,  0.7975, 0, 0, 0],
-                    [ 0.6091,  0.8586,  0.8775, 0, 0, 0],
-                    [ 0.5673, -0.2957,  0.9791, 0, 0, 0],
+                    [0.4091, 0.8586, 0.8775, 0, 0, 0],
+                    [-0.3577,  0.7804,  0.8975, 0, 0, 0],
+                    [ 0.8673, -0.2957,  0.8791, 0, 0, 0],
 
                     [-0.7596,  0.0925,  1.0222, 0, 0, 0],
-                    [ 0.7372,  0.18387, 1.1031, 0, 0, 0],
+                    [ 0.4372,  0.18387, 1.1031, 0, 0, 0],
                     [-0.5041,  0.5650,  0.9561, 0, 0, 0],
                     [-0.1466,  0.1610,  0.6727, 0, 0, 0])
 
@@ -249,8 +271,6 @@ class DepthRuntime(object):
                     points_from_robot.append(pos * 1000)
                     sleep(0.2)
 
-                # check_user_input an print data
-
                 if pygame.key.get_pressed()[pygame.K_r]:
                     def robot_routine():
                         robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
@@ -270,6 +290,29 @@ class DepthRuntime(object):
                     threading.Thread(target=robot_routine, ).start()
                     sleep(0.2)
 
+                if pygame.key.get_pressed()[pygame.K_e]:
+
+                    # todo work with these points
+                    robot_points, kinect_points = generate_sample_points()
+
+                    def robot_routine(robot_points):
+                        robot_poses = np.pad(robot_points, ((0, 0), (0, 3)), 'constant')
+                        robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
+                        for pose in poselist:
+                            robot.movex('movej', robot_poses, acc=0.4, vel=0.4)
+                            sleep(5)
+                            points_from_kinect1.append((kx, ky, kz))
+                            points_from_kinect2.append((ckx, cky, ckz))
+                            points_from_kinect3.append((cckx, ccky, cckz))
+                            pos = robot.get_pos()
+                            points_from_robot.append(pos * 1000)
+                            print([int(kx), int(ky), int(kz)])
+                            print([int(ckx*1000), int(cky*1000), int(ckz*1000)])
+                            print([int(cckx), int(ccky), int(cckz)])
+                            print([*pos * 1000], '\n')
+
+                    threading.Thread(target=robot_routine, args=(robot_points)).start()
+                    sleep(0.2)
 
                 if pygame.key.get_pressed()[pygame.K_w]:
                     print(*points_from_kinect1)
@@ -338,7 +381,6 @@ class DepthRuntime(object):
         # Close our Kinect sensor, close the window and quit.
         self._kinect.close()
         pygame.quit()
-
 
 
 

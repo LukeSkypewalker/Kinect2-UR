@@ -1,10 +1,36 @@
 import numpy as np
 
+
 class PointGenerator:
-    def _to_robot_point(self, kinect_point, transform_matrix):
-        adjusted_point = np.append(kinect_point, 1)
-        result = np.matmul(transform_matrix, adjusted_point)
-        return result[:-1]
+    def generate_robot_points(self,
+                              # point generation params
+                              min_distance,
+                              max_distance,
+                              fov_degrees,
+                              distance_slice_count,
+                              point_counts_in_slice,
+                              transform_matrix,
+
+                              # point filtering params
+                              max_radius,
+                              tool_vertical_offset,
+                              min_height,
+                              min_cylinder_radius):
+
+        kinect_points = self._generate_kinect_points(min_distance, max_distance, fov_degrees, distance_slice_count,
+                                                     point_counts_in_slice)
+
+        robot_points = self._to_robot_points(kinect_points, transform_matrix)
+        robot_reachable_points, kinect_reachable_points = self._find_reachable_points(robot_points,
+                                                                                      kinect_points,
+                                                                                      max_radius,
+                                                                                      tool_vertical_offset,
+                                                                                      min_height,
+                                                                                      min_cylinder_radius)
+
+        # Pad each point with default orientation orientation, e.g. [3,2,6] => [3,2,6,0,0,0]
+
+        return robot_reachable_points, kinect_reachable_points
 
     def _generate_kinect_points(self,
                                 min_distance=1.0,
@@ -27,21 +53,6 @@ class PointGenerator:
                 x_direction = -x_direction
         return np.array(result)
 
-    def _find_reachable_points(self,
-                               src_points,
-                               max_radius=1.35,
-                               tool_vertical_offset=0.0,
-                               min_height=0,
-                               min_cylinder_radius=0.2):
-        result = []
-        for point in src_points:
-            normalized_point = [point[0], point[1], point[2]- tool_vertical_offset]
-            if np.linalg.norm(normalized_point) <= max_radius and \
-                    point[2]> min_height and \
-                    np.linalg.norm(point[:2]) > min_cylinder_radius:
-                result.append(point)
-        return np.array(result)
-
     def _to_robot_points(self,
                          kinect_points,
                          transform_matrix=np.identity(4)):
@@ -51,56 +62,26 @@ class PointGenerator:
             result.append(robot_point)
         return np.array(result)
 
-    def generate_robot_points(self,
-                              # point generation params
-                              min_distance,
-                              max_distance,
-                              fov_degrees,
-                              distance_slice_count,
-                              point_counts_in_slice,
-                              transform_matrix,
+    def _to_robot_point(self, kinect_point, transform_matrix):
+        adjusted_point = np.append(kinect_point, 1)
+        result = np.matmul(transform_matrix, adjusted_point)
+        return result[:-1]
 
-                              # point filtering params
-                              max_radius,
-                              tool_vertical_offset,
-                              min_height,
-                              min_cylinder_radius):
-
-        kinect_points = self._generate_kinect_points(min_distance, max_distance, fov_degrees, distance_slice_count,
-                                                     point_counts_in_slice)
-
-        robot_points = self._to_robot_points(kinect_points, transform_matrix)
-        reachable_points = self._find_reachable_points(robot_points, max_radius, tool_vertical_offset, min_height,
-                                                       min_cylinder_radius)
-
-        # Pad each point with default orientation orientation, e.g. [3,2,6] => [3,2,6,0,0,0]
-        result = np.pad(reachable_points, ((0, 0), (0, 3)), 'constant')
-        # np.set_printoptions(threshold=np.nan)
-        # print('Reachable points:\n', np.array2string(result, separator=',', max_line_width=100))
-        return result
-
-
-transform = np.array([
-    [9.11553612e-02, -2.97533421e-01, -9.00868653e-01, 1.76319118e+00],
-    [-9.99589709e-01, 2.31756532e-02, -1.23105851e-01, 2.17456855e-01],
-    [-8.01612547e-03, 9.80898800e-01, -2.65743949e-01, 9.56882597e-01],
-    [0, 0, 0, 1]
-])
-
-generator = PointGenerator()
-final_points = generator.generate_robot_points(
-    min_distance=0.8,
-    max_distance=1.8,
-    fov_degrees=(60, 58),
-    distance_slice_count=10,
-    point_counts_in_slice=(10, 10),
-    transform_matrix=transform,
-
-    max_radius=1.35,
-    tool_vertical_offset=0.1,
-    min_height=0.6,
-    min_cylinder_radius=0.2)
-
-pass
-
-
+    def _find_reachable_points(self,
+                               robot_points,
+                               kinect_points,
+                               max_radius=1.35,
+                               tool_vertical_offset=0.0,
+                               min_height=0,
+                               min_cylinder_radius=0.2):
+        robot_reachable_points = []
+        kinect_reachable_points = []
+        for i, point in enumerate(robot_points):
+            # todo point-tcp
+            normalized_point = [point[0], point[1], point[2] - tool_vertical_offset]
+            if np.linalg.norm(normalized_point) <= max_radius and \
+                    point[2] > min_height and \
+                    np.linalg.norm(point[:2]) > min_cylinder_radius:
+                robot_reachable_points.append(point)
+                kinect_reachable_points.append(kinect_points[i])
+        return np.array(robot_reachable_points), np.array(kinect_reachable_points)
