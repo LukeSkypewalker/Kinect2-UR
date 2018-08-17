@@ -6,12 +6,12 @@ class PointGenerator:
         result = np.matmul(transform_matrix, adjusted_point)
         return result[:-1]
 
-    def generate_kinect_points(self,
-                               min_distance=1.0,
-                               max_distance=2.0,
-                               fov_degrees=(70.6, 60),
-                               distance_slice_count=3,
-                               point_counts_in_slice=(3, 3)):
+    def _generate_kinect_points(self,
+                                min_distance=1.0,
+                                max_distance=2.0,
+                                fov_degrees=(70.6, 60),
+                                distance_slice_count=3,
+                                point_counts_in_slice=(3, 3)):
         result = []
         tangents = np.tan(np.deg2rad(fov_degrees) / 2)
         for z in np.linspace(min_distance, max_distance, distance_slice_count):
@@ -27,10 +27,12 @@ class PointGenerator:
                 x_direction = -x_direction
         return np.array(result)
 
-    def find_reachable_points(self,
-                              src_points,
-                              max_radius=1.35,
-                              tool_vertical_offset=0.0, min_height=0, min_cylinder_radius=0.2):
+    def _find_reachable_points(self,
+                               src_points,
+                               max_radius=1.35,
+                               tool_vertical_offset=0.0,
+                               min_height=0,
+                               min_cylinder_radius=0.2):
         result = []
         for point in src_points:
             normalized_point = [point[0], point[1], point[2]- tool_vertical_offset]
@@ -40,18 +42,41 @@ class PointGenerator:
                 result.append(point)
         return np.array(result)
 
-    def to_robot_points(self,
-                        kinect_points,
-                        transform_matrix=np.identity(4)):
+    def _to_robot_points(self,
+                         kinect_points,
+                         transform_matrix=np.identity(4)):
         result = []
         for kinect_point in kinect_points:
             robot_point = self._to_robot_point(kinect_point, transform_matrix)
             result.append(robot_point)
         return np.array(result)
 
-    def add_orientations(self, points):
-        # each point is padded with zeros, e.g. [3,2,6] => [3,2,6,0,0,0]
-        result = np.pad(points, ((0, 0), (0, 3)), 'constant')
+    def generate_robot_points(self,
+                              # point generation params
+                              min_distance,
+                              max_distance,
+                              fov_degrees,
+                              distance_slice_count,
+                              point_counts_in_slice,
+                              transform_matrix,
+
+                              # point filtering params
+                              max_radius,
+                              tool_vertical_offset,
+                              min_height,
+                              min_cylinder_radius):
+
+        kinect_points = self._generate_kinect_points(min_distance, max_distance, fov_degrees, distance_slice_count,
+                                                     point_counts_in_slice)
+
+        robot_points = self._to_robot_points(kinect_points, transform_matrix)
+        reachable_points = self._find_reachable_points(robot_points, max_radius, tool_vertical_offset, min_height,
+                                                       min_cylinder_radius)
+
+        # Pad each point with default orientation orientation, e.g. [3,2,6] => [3,2,6,0,0,0]
+        result = np.pad(reachable_points, ((0, 0), (0, 3)), 'constant')
+        # np.set_printoptions(threshold=np.nan)
+        # print('Reachable points:\n', np.array2string(result, separator=',', max_line_width=100))
         return result
 
 
@@ -63,24 +88,19 @@ transform = np.array([
 ])
 
 generator = PointGenerator()
-kinect_points = generator.generate_kinect_points(
-    point_counts_in_slice=(10, 10),
+final_points = generator.generate_robot_points(
     min_distance=0.8,
     max_distance=1.8,
+    fov_degrees=(60, 58),
     distance_slice_count=10,
-    fov_degrees=(60, 58))
+    point_counts_in_slice=(10, 10),
+    transform_matrix=transform,
 
-robot_points = generator.to_robot_points(kinect_points,
-                                         transform_matrix=transform)
-reachable_points = generator.find_reachable_points(
-    robot_points,
+    max_radius=1.35,
+    tool_vertical_offset=0.1,
     min_height=0.6,
-    tool_vertical_offset=0.1)
+    min_cylinder_radius=0.2)
 
+pass
 
-final_points = generator.add_orientations(reachable_points)
-
-np.set_printoptions(threshold=np.nan)
-print('Reachable points:\n', np.array2string(final_points, separator=',', max_line_width=100))
-# tcp:(0,0,0.1), radius:1.350
 
