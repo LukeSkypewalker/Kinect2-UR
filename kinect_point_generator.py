@@ -16,11 +16,15 @@ class PointGenerator:
         tangents = np.tan(np.deg2rad(fov_degrees) / 2)
         for z in np.linspace(min_distance, max_distance, distance_slice_count):
             max_offsets_in_slice = z * tangents
-            # Create points in rows, left to right, top to bottom.
+            # Create points in boustrophedon rows, top to bottom.
+            x_direction = 1
             for y in np.linspace(max_offsets_in_slice[1], -max_offsets_in_slice[1], point_counts_in_slice[1]):
-                for x in np.linspace(-max_offsets_in_slice[0], max_offsets_in_slice[0], point_counts_in_slice[0]):
+                start = x_direction * max_offsets_in_slice[0]
+                for x in np.linspace(start, -start, point_counts_in_slice[0]):
                     new_point = np.array([x, y, z])
                     result.append(new_point)
+                # Reverse the direction for the next row.
+                x_direction = -x_direction
         return np.array(result)
 
     def find_reachable_points(self,
