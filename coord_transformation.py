@@ -50,6 +50,25 @@ def get_transform(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, X1, Y1, Z1, X2
     return tranform_matrix
 
 
+def calc_transform_matrix(points_from_kinect, points_from_robot):
+    a, b, c, d = points_from_kinect[:4]
+    x1, y1, z1 = a[:]
+    x2, y2, z2 = b[:]
+    x3, y3, z3 = c[:]
+    x4, y4, z4 = d[:]
+
+    A, B, C, D = points_from_robot[:4]
+    X1, Y1, Z1 = A[:]
+    X2, Y2, Z2 = B[:]
+    X3, Y3, Z3 = C[:]
+    X4, Y4, Z4 = D[:]
+
+    transformMatrix = get_transform(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4,
+                                    X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3, X4, Y4, Z4)
+    T = np.vstack((transformMatrix, [0, 0, 0, 1]))
+    return T
+
+
 if __name__ == '__main__':
     # TransformMatrix = get_transform(8, 1, 1,   2, 2, 3,   3, 3, 2,   7, 7, 8,      1, 7, 1,   2, 1, 3,   3, 2, 2,   7, 6, 8)
     # TransformMatrix = get_transform(1125, 1052, 2136,    1406, 671, 1624,    2554, 1317, 1970,    2957, 1174, 2565,
