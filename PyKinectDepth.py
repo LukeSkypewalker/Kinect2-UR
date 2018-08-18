@@ -11,15 +11,11 @@ from coord_transformation import calc_transform_matrix
 from kinect_point_generator import PointGenerator
 
 FRAME_WIDTH = 512
-frame_height = 424
-frame_width_half = FRAME_WIDTH / 2
-frame_height_half = frame_height / 2
-fov_horiz = np.deg2rad(70.6)
-fov_vert = np.deg2rad(60)
-fov_horiz_half = fov_horiz / 2
-fov_vert_half = fov_vert / 2
+FRAME_HEIGHT = 424
+FOV_HORIZ = np.deg2rad(70.6)
+FOV_VERT = np.deg2rad(60)
+ERROR_RADIUS_M = 0.2
 mean_point = None
-error_radius = 200
 
 transform_matrix = np.array([
     [3.18793477e-01, -2.11661971e-01, -9.67004001e-01, 2.16169931],
@@ -53,12 +49,12 @@ def enqueue(item, array):
     return result
 
 
-def calc_coords_in_mm(x_in_pixels, y_in_pixels, depth):
-    x_half = x_in_pixels - frame_width_half
-    y_half = -(y_in_pixels - frame_height_half)
-    x_in_mm = depth * np.math.tan(fov_horiz_half) * (x_half / frame_width_half)
-    y_in_mm = depth * np.math.tan(fov_vert_half) * (y_half / frame_height_half)
-    return x_in_mm, y_in_mm, depth
+def calc_coords_in_meters(x_in_pixels, y_in_pixels, depth_in_meters):
+    x_half = x_in_pixels - FRAME_WIDTH / 2
+    y_half = -(y_in_pixels - FRAME_HEIGHT / 2)
+    x_in_meters = depth_in_meters * np.math.tan(FOV_HORIZ / 2) * (x_half / FRAME_WIDTH / 2)
+    y_in_meters = depth_in_meters * np.math.tan(FOV_VERT / 2) * (y_half / FRAME_HEIGHT / 2)
+    return x_in_meters, y_in_meters, depth_in_meters
 
 
 def test_coordinates(T, points_from_kinect, points_from_robot):
@@ -73,15 +69,15 @@ def test_coordinates(T, points_from_kinect, points_from_robot):
         print('error', np.linalg.norm(coord[:3] - [*real_robot_coords]), '\n')
 
 
-def  get_user_input(dataset, original_frame, filtered_frame, points_from_kinect, points_from_robot, robot_thread_data):
+def get_user_input(dataset, original_frame, filtered_frame, points_from_kinect, points_from_robot, robot_thread_data):
     global mean_point
     if pygame.key.get_pressed()[pygame.K_q]:
-        mean_point_in_mm = calc_coords_in_mm(*mean_point)
-        points_from_kinect.append(mean_point_in_mm)
-        pos = robot.get_pos()
-        print(mean_point_in_mm)
-        print([*pos * 1000], '\n')
-        points_from_robot.append(pos * 1000)
+        mean_point_in_m = calc_coords_in_meters(*mean_point)
+        points_from_kinect.append(mean_point_in_m)
+        robot_position_m = robot.get_pos()
+        print(mean_point_in_m)
+        print([*robot_position_m], '\n')
+        points_from_robot.append(robot_position_m)
         sleep(0.2)
 
     if pygame.key.get_pressed()[pygame.K_r]:
@@ -103,11 +99,11 @@ def  get_user_input(dataset, original_frame, filtered_frame, points_from_kinect,
         test_coordinates(transform_matrix, points_from_kinect, points_from_robot)
 
     if pygame.key.get_pressed()[pygame.K_x]:
-        f = filtered_frame.reshape((frame_height, FRAME_WIDTH))
+        f = filtered_frame.reshape((FRAME_HEIGHT, FRAME_WIDTH))
         np.savetxt('kinect-%s.txt' % time(), f, fmt='% 4s')
 
     if pygame.key.get_pressed()[pygame.K_a]:
-        f = filtered_frame.reshape((frame_height, FRAME_WIDTH))
+        f = filtered_frame.reshape((FRAME_HEIGHT, FRAME_WIDTH))
         dataset.append(f)
 
     if pygame.key.get_pressed()[pygame.K_g]:
@@ -131,16 +127,17 @@ def get_many_points(robot_thread_data):
     def robot_routine(robot_points, robot_thread_data):
         global mean_point
         robot_poses = np.pad(robot_points, ((0, 0), (0, 3)), 'constant')
-        robot.movej([0, -1.57, 0, 0, 1.57, 0], acc=0.4, vel=0.4)
+        robot.movej([0, -2.2, -0.8, -2, -2, 0], acc=0.4, vel=0.4)
         for i, pose in enumerate(robot_poses):
             robot_thread_data['target_pose_index'] = i
             robot.movex('movej', pose, acc=0.4, vel=0.4)
             sleep(3)
             points_from_kinect.append(mean_point)
             pos = robot.get_pos()
-            points_from_robot.append(pos * 1000)
+            points_from_robot.append(pos)
             print(mean_point)
-            print([*pos * 1000], '\n')
+            print([*pos], '\n')
+        # kinect observed (x_px, y_px, depth_m), robot from sensor (x_m, y_m, z_m)
         np.save('kinect-dataset', (points_from_kinect, points_from_robot))
         robot_thread_data['target_pose_index'] = None
         robot_thread_data['kinect_points'] = None
@@ -168,14 +165,14 @@ def get_poins_for_initial_transform_matrix(points_from_kinect, points_from_robot
         for pose in poselist:
             robot.movex('movej', pose, acc=0.4, vel=0.4)
             sleep(5)
-            mean_point_in_mm = calc_coords_in_mm(*mean_point)
-            points_from_kinect.append(mean_point_in_mm)
+            mean_point_in_m = calc_coords_in_meters(*mean_point)
+            points_from_kinect.append(mean_point_in_m)
             pos = robot.get_pos()
-            points_from_robot.append(pos * 1000)
-            print(mean_point_in_mm)
-            print([*pos * 1000], '\n')
+            points_from_robot.append(pos)
+            print(mean_point_in_m)
+            print([*pos], '\n')
 
-    threading.Thread(target=robot_routine, ).start()
+    threading.Thread(target=robot_routine).start()
     sleep(0.2)
 
 
@@ -190,12 +187,18 @@ def generate_sample_points(transform):
         transform_matrix=transform,
         max_radius=1.35,
         tool_vertical_offset=0.24,
-        min_height=0.8,
+        min_height=0.9,
         min_cylinder_radius=0.2)
 
 
 class DepthRuntime(object):
     MILLIMETERS_IN_METER = 1000.0
+    MAX_DISTANCE_TO_DRAW_M = 4.0
+    MIN_DISTANCE_TO_SEARCH_M = 0.8
+    MAX_DISTANCE_TO_SEARCH_M = 3.5
+    INTENSITY_FACTOR = 255.0 / MAX_DISTANCE_TO_DRAW_M
+    BLACK_BAR_TOP_HEIGHT = 10
+    BLACK_BAR_BOTTOM_HEIGHT = 118
 
     def __init__(self):
         pygame.init()
@@ -221,11 +224,20 @@ class DepthRuntime(object):
             (self._kinect.depth_frame_desc.Width, self._kinect.depth_frame_desc.Height),
             pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE, 32)
 
-    def draw_depth_frame(self, frame, target_surface):
-        if frame is None:  # some usb hub do not provide the depth image. it works with Kinect studio though
+    @staticmethod
+    def meters_to_pixels(length_in_meters, depth_in_meters, frame_size_in_pixels, fov_in_radians):
+        # Assumptions: metric coordinates start at image center, with x going to the left and y to the top.
+        frame_size_in_meters = 2 * depth_in_meters * np.tan(fov_in_radians / 2)
+        raw_result = -frame_size_in_pixels / frame_size_in_meters * length_in_meters + frame_size_in_pixels / 2
+        raw_result = np.clip(raw_result, 0, frame_size_in_pixels - 1)
+        return int(round(raw_result))
+
+    def draw_depth_frame(self, frame_in_meters, target_surface):
+        if frame_in_meters is None:  # some usb hub do not provide the depth image. it works with Kinect studio though
             return
         target_surface.lock()
-        f8 = np.uint8(frame.clip(1, 4000) / 16.)
+        # Make farthest pixels the whitest.
+        f8 = np.uint8(frame_in_meters.clip(0, self.MAX_DISTANCE_TO_DRAW_M) * self.INTENSITY_FACTOR)
         frame8bit = np.dstack((f8, f8, f8))
         address = self._kinect.surface_as_array(target_surface.get_buffer())
         ctypes.memmove(address, frame8bit.ctypes.data, frame8bit.size)
@@ -234,8 +246,8 @@ class DepthRuntime(object):
 
     def run(self):
         global mean_point
-        last_points_of_interest = np.zeros((50,3))
-        last_frames = np.zeros((3, FRAME_WIDTH * frame_height))
+        last_points_of_interest = np.zeros((50, 3))
+        last_frames = np.zeros((3, FRAME_WIDTH * FRAME_HEIGHT))
 
         points_from_robot = []
         points_from_kinect = []
@@ -256,29 +268,28 @@ class DepthRuntime(object):
                                                            pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE, 32)
 
             if self._kinect.has_new_depth_frame():
-                frame = self._kinect.get_last_depth_frame()
-                #todo convert everything in meters "/ self.MILLIMETERS_IN_METER"
+                frame = self._kinect.get_last_depth_frame() / self.MILLIMETERS_IN_METER
                 # frame = np.flip(frame.reshape((frame_height, frame_width)), 1).reshape(-1)
 
-                cuted_frame = frame.copy()
                 point_of_interest_index = robot_thread_data['target_pose_index']
+
+                trim_top, trim_bottom = (self.BLACK_BAR_TOP_HEIGHT, FRAME_HEIGHT - self.BLACK_BAR_BOTTOM_HEIGHT)
+                trim_closest, trim_farthest = (self.MIN_DISTANCE_TO_SEARCH_M, self.MAX_DISTANCE_TO_SEARCH_M)
                 if point_of_interest_index is not None:
                     point_of_interest = robot_thread_data['kinect_points'][point_of_interest_index]
-                    y_top_offset = int(round(point_of_interest[1])) - error_radius
-                    y_bottom_offset = int(round(point_of_interest[1])) + error_radius
-                    z_closest_offset = int(round(point_of_interest[2])) - error_radius
-                    z_farthest_offset = int(round(point_of_interest[2])) + error_radius
-                    cuted_frame[:FRAME_WIDTH * y_top_offset] = 0
-                    cuted_frame[-FRAME_WIDTH * y_bottom_offset:] = 0
-                    cuted_frame[cuted_frame < z_closest_offset] = 0
-                    cuted_frame[cuted_frame > z_farthest_offset] = 0
-                else:
-                    cuted_frame[:5120] = 0
-                    cuted_frame[-60000:] = 0
-                    cuted_frame[cuted_frame < 800] = 0
-                    cuted_frame[cuted_frame > 3500] = 0
+                    depth_in_m = point_of_interest[2]
+                    trim_top = DepthRuntime.meters_to_pixels(point_of_interest[1] + ERROR_RADIUS_M, depth_in_m, FRAME_HEIGHT, FOV_VERT)
+                    trim_bottom = DepthRuntime.meters_to_pixels(point_of_interest[1] - ERROR_RADIUS_M, depth_in_m, FRAME_HEIGHT, FOV_VERT)
+                    trim_closest = depth_in_m - ERROR_RADIUS_M
+                    trim_farthest = depth_in_m + ERROR_RADIUS_M
 
-                last_frames = enqueue(cuted_frame, last_frames)
+                trimmed_frame = frame.copy()
+                trimmed_frame[:FRAME_WIDTH * trim_top] = 0
+                trimmed_frame[FRAME_WIDTH * trim_bottom:] = 0
+                trimmed_frame[trimmed_frame < trim_closest] = 0
+                trimmed_frame[trimmed_frame > trim_farthest] = 0
+
+                last_frames = enqueue(trimmed_frame, last_frames)
                 filtered_frame = noise_filter(last_frames)
 
                 top_point_index = find_top_point_index(filtered_frame)
@@ -291,6 +302,8 @@ class DepthRuntime(object):
                 self.draw_depth_frame(filtered_frame, self._frame_surface)
 
                 pygame.draw.circle(self._frame_surface, (255, 0, 0), (int(mean_point[0]), int(mean_point[1])), 10, 1)
+                pygame.draw.line(self._frame_surface, (255, 255, 0), (0, trim_top), (FRAME_WIDTH-1, trim_top), 2)
+                pygame.draw.line(self._frame_surface, (255, 255, 0), (0, trim_bottom), (FRAME_WIDTH-1, trim_bottom), 2)
             self._screen.blit(self._frame_surface, (0, 0))
             pygame.display.update()
 
