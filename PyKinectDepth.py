@@ -234,11 +234,11 @@ class DepthRuntime(object):
         pygame.quit()
 
     def get_user_input(self, dataset, frame, mean_point, points_from_kinect, points_from_robot):
-        mean_point_in_mm = calc_coords_in_mm(mean_point)
+        mean_point_in_mm = calc_coords_in_mm(*mean_point)
         # print('my_coords:', kx, ky, kz)
         # print('Alex_coords:', ckx, cky, ckz)
         # print('Alex+calibration_coords:', cckx, ccky, cckz)
-        # check_user_input an print data
+
         if pygame.key.get_pressed()[pygame.K_q]:
             points_from_kinect.append(mean_point_in_mm)
             pos = robot.get_pos()
@@ -248,8 +248,7 @@ class DepthRuntime(object):
             sleep(0.2)
 
         if pygame.key.get_pressed()[pygame.K_r]:
-
-            self.get_initial_transform_matrix()
+            self.get_initial_transform_matrix(points_from_kinect, points_from_robot, mean_point_in_mm)
 
         if pygame.key.get_pressed()[pygame.K_e]:
             robot_points, kinect_points = generate_sample_points()
@@ -296,7 +295,6 @@ class DepthRuntime(object):
                         [-0.3577, 0.7804, 0.8975, 0, 0, 0],
                         [0.8673, -0.2957, 0.8791, 0, 0, 0],
 
-                        [-0.7596, 0.0925, 1.0222, 0, 0, 0],
                         [0.4372, 0.18387, 1.1031, 0, 0, 0],
                         [-0.5041, 0.5650, 0.9561, 0, 0, 0],
                         [-0.1466, 0.1610, 0.6727, 0, 0, 0])
@@ -319,5 +317,5 @@ class DepthRuntime(object):
 __main__ = "Kinect v2 Depth"
 robot = urx.Robot("10.0.0.2", use_rt=True)
 robot.set_tcp((0, 0, 0.1, 0, 0, 0))
-game = DepthRuntime();
-game.run();
+game = DepthRuntime()
+game.run()

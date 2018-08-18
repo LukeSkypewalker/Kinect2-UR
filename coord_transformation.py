@@ -45,9 +45,7 @@ def get_transform(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4, X1, Y1, Z1, X2
     res = (solve([eq1, eq2, eq3, eq4, eq5, eq6, eq7, eq8, eq9, eq10, eq11, eq12],
                  [r11, r12, r13, r21, r22, r23, r31, r32, r33, t1, t2, t3]))
     print(res)
-    r11, r12, r13, r21, r22, r23, r31, r32, r33, t1, t2, t3 = \
-        res[r11], res[r12], res[r13], res[r21], res[r22], res[r23], res[r31], res[r32], res[r33], res[t1], res[t2], res[
-            t3]
+    r11, r12, r13, r21, r22, r23, r31, r32, r33, t1, t2, t3 = res[r11], res[r12], res[r13], res[r21], res[r22], res[r23], res[r31], res[r32], res[r33], res[t1], res[t2], res[t3]
     tranform_matrix = np.array([[r11, r12, r13, t1], [r21, r22, r23, t2], [r31, r32, r33, t3]], dtype='float')
     return tranform_matrix
 
